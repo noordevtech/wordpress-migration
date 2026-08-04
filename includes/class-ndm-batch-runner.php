@@ -76,14 +76,17 @@ class NDM_Batch_Runner {
 
 		$resumable = in_array( $state['stage'], array( NDM_State::STAGE_DB, NDM_State::STAGE_FILES, NDM_State::STAGE_VERIFY, NDM_State::STAGE_ERROR ), true );
 		if ( ! $fresh && $resumable && ! empty( $state['tables'] ) ) {
-			// Resume: keep every checkpoint, just clear the error/pause flags.
+			// Resume: keep every checkpoint, just clear the error/pause flags
+			// and give the failure budget a fresh start.
 			if ( NDM_State::STAGE_ERROR === $state['stage'] ) {
 				$state['stage'] = $this->stage_after_error( $state );
 			}
-			$state['paused'] = false;
-			$state['error']  = '';
+			$state['paused']  = false;
+			$state['error']   = '';
+			$state['retries'] = 0;
 			NDM_State::save_source( $state );
 			NDM_Log::info( 'Resuming migration from checkpoint (stage: ' . $state['stage'] . ').' );
+			$this->check_destination_version( $client );
 			$this->schedule_cron();
 			return true;
 		}
@@ -93,6 +96,7 @@ class NDM_Batch_Runner {
 		if ( is_wp_error( $handshake ) ) {
 			return $handshake;
 		}
+		$this->warn_on_version_mismatch( isset( $handshake['plugin'] ) ? (string) $handshake['plugin'] : '' );
 
 		global $wpdb;
 		$prepare = $client->post(
@@ -120,6 +124,36 @@ class NDM_Batch_Runner {
 
 		$this->schedule_cron();
 		return true;
+	}
+
+	/**
+	 * Ask the destination for its plugin version and warn on mismatch.
+	 *
+	 * @param NDM_Client $client Client.
+	 */
+	private function check_destination_version( NDM_Client $client ) {
+		$handshake = $client->post( 'handshake', array( 'source_url' => home_url() ) );
+		if ( ! is_wp_error( $handshake ) ) {
+			$this->warn_on_version_mismatch( isset( $handshake['plugin'] ) ? (string) $handshake['plugin'] : '' );
+		}
+	}
+
+	/**
+	 * Log a prominent warning when the two sites run different plugin versions.
+	 *
+	 * Mixed versions are the root of hard-to-diagnose sync failures: fixes
+	 * applied on one side silently miss the other.
+	 *
+	 * @param string $dest_version Destination plugin version ('' when unknown).
+	 */
+	private function warn_on_version_mismatch( $dest_version ) {
+		if ( '' === $dest_version ) {
+			NDM_Log::warn( 'Destination did not report a plugin version (very old build?). Update NoorDev Migrate on the target site to v' . NDM_VERSION . '.' );
+			return;
+		}
+		if ( $dest_version !== NDM_VERSION ) {
+			NDM_Log::warn( sprintf( 'VERSION MISMATCH: this site runs v%s but the target runs v%s. Update the plugin on the target site, then Resume — mixed versions cause failures that look like data errors.', NDM_VERSION, $dest_version ) );
+		}
 	}
 
 	/**
