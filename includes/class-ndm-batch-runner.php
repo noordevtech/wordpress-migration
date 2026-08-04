@@ -201,6 +201,32 @@ class NDM_Batch_Runner {
 	}
 
 	/**
+	 * Acquire the cross-request mutex.
+	 *
+	 * The dashboard AJAX loop and the WP-Cron fallback can both try to drive
+	 * the sync at the same time; without exclusion they race on the same
+	 * checkpoint (worst case: one loop drops/recreates a staging table while
+	 * the other is inserting into it). A MySQL named lock is released
+	 * automatically if the PHP process dies, so it can never stay stuck.
+	 *
+	 * @return bool Whether the lock was obtained.
+	 */
+	private function acquire_lock() {
+		global $wpdb;
+		$name = $wpdb->dbname . '.' . $wpdb->prefix . 'ndm_tick';
+		return '1' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $name ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+	}
+
+	/**
+	 * Release the cross-request mutex.
+	 */
+	private function release_lock() {
+		global $wpdb;
+		$name = $wpdb->dbname . '.' . $wpdb->prefix . 'ndm_tick';
+		$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $name ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+	}
+
+	/**
 	 * Process batches for up to TIME_BUDGET seconds. Returns fresh state.
 	 *
 	 * @return array
@@ -211,6 +237,24 @@ class NDM_Batch_Runner {
 			return $state;
 		}
 
+		if ( ! $this->acquire_lock() ) {
+			// Another process (cron or a second tab) is already syncing.
+			return $state;
+		}
+
+		try {
+			return $this->tick_locked();
+		} finally {
+			$this->release_lock();
+		}
+	}
+
+	/**
+	 * The actual tick loop; caller must hold the lock.
+	 *
+	 * @return array
+	 */
+	private function tick_locked() {
 		$client   = new NDM_Client();
 		$deadline = time() + self::TIME_BUDGET;
 
@@ -340,6 +384,15 @@ class NDM_Batch_Runner {
 		if ( $has_rows ) {
 			$response = $this->send_rows( $client, $table['base'], $batch['columns'], $batch['rows'] );
 			if ( is_wp_error( $response ) ) {
+				if ( 'ndm_http_409' === $response->get_error_code() ) {
+					// Staging table went missing on the destination: re-send the
+					// structure on the next pass instead of failing the migration.
+					$state                                  = NDM_State::get_source();
+					$state['tables'][ $index ]['created']   = false;
+					NDM_State::save_source( $state );
+					NDM_Log::warn( 'Staging table missing for ' . $table['base'] . '; re-sending table structure.' );
+					return true;
+				}
 				return $response;
 			}
 		}
@@ -393,9 +446,9 @@ class NDM_Batch_Runner {
 			return true;
 		}
 
-		// Auth/validation errors won't be cured by smaller batches.
+		// Auth/validation/consistency errors won't be cured by smaller batches.
 		$code = $response->get_error_code();
-		if ( in_array( $code, array( 'ndm_http_400', 'ndm_http_401', 'ndm_http_403', 'ndm_not_connected' ), true ) ) {
+		if ( in_array( $code, array( 'ndm_http_400', 'ndm_http_401', 'ndm_http_403', 'ndm_http_409', 'ndm_not_connected' ), true ) ) {
 			return $response;
 		}
 
@@ -611,8 +664,18 @@ class NDM_Batch_Runner {
 		$state['stage'] = NDM_State::STAGE_FINALIZING;
 		NDM_State::save_source( $state );
 
-		$client = new NDM_Client();
-		return $this->tick_finalize( $client, $state );
+		if ( ! $this->acquire_lock() ) {
+			// A cron tick will pick the finalizing stage up; don't send a
+			// second, concurrent cutover request.
+			return true;
+		}
+
+		try {
+			$client = new NDM_Client();
+			return $this->tick_finalize( $client, $state );
+		} finally {
+			$this->release_lock();
+		}
 	}
 
 	/**

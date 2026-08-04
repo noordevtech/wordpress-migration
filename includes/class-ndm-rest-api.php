@@ -185,6 +185,11 @@ class NDM_Rest_Api {
 			return new WP_Error( 'ndm_bad_rows', 'Missing row payload.', array( 'status' => 400 ) );
 		}
 
+		if ( ! NDM_DB_Importer::stage_table_exists( $base ) ) {
+			// 409 tells the source to re-send the table structure and retry.
+			return new WP_Error( 'ndm_no_stage_table', 'Staging table missing for ' . $base . '; structure must be re-sent.', array( 'status' => 409 ) );
+		}
+
 		$state    = NDM_State::get_dest();
 		$replacer = new NDM_Search_Replace( (array) $state['replacements'] );
 

@@ -61,11 +61,31 @@ class NDM_DB_Importer {
 		}
 
 		$result = $wpdb->query( $create_sql ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		if ( false === $result && $fresh ) {
-			return new WP_Error( 'ndm_create_failed', 'Could not create staging table: ' . $wpdb->last_error );
+
+		if ( false === $result && $wpdb->last_error && false !== stripos( $wpdb->last_error, 'collation' ) ) {
+			// MySQL-8-only collations (utf8mb4_0900_*) don't exist on MariaDB;
+			// retry with the universally available equivalent.
+			$fallback = preg_replace( '/utf8mb4_0900_\w+/i', 'utf8mb4_unicode_ci', $create_sql );
+			$result   = $wpdb->query( $fallback ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		}
+
+		// Trust nothing: confirm the table is really there before accepting rows.
+		if ( ! self::stage_table_exists( $base ) ) {
+			return new WP_Error( 'ndm_create_failed', 'Could not create staging table ' . $stage . ': ' . ( $wpdb->last_error ? $wpdb->last_error : 'unknown database error' ) );
 		}
 
 		return true;
+	}
+
+	/**
+	 * Whether the staging table for a base name exists.
+	 *
+	 * @param string $base Base table name.
+	 * @return bool
+	 */
+	public static function stage_table_exists( $base ) {
+		global $wpdb;
+		return (bool) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', self::stage_table( $base ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 	}
 
 	/**
