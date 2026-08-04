@@ -97,8 +97,14 @@ class NDM_Client {
 				return is_array( $decoded ) ? $decoded : array();
 			}
 
-			$message = isset( $decoded['message'] ) ? $decoded['message'] : ( 'HTTP ' . $code );
-			$last    = new WP_Error( 'ndm_http_' . $code, $message );
+			if ( isset( $decoded['message'] ) ) {
+				$message = $decoded['message'];
+			} else {
+				// Non-JSON body (WordPress fatal-error page, proxy error page…).
+				$raw     = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( wp_remote_retrieve_body( $response ) ) ) );
+				$message = 'HTTP ' . $code . ( $raw ? ': ' . substr( $raw, 0, 200 ) : '' );
+			}
+			$last = new WP_Error( 'ndm_http_' . $code, $message );
 
 			// 4xx (auth, bad payload) won't improve with retries.
 			if ( $code >= 400 && $code < 500 ) {

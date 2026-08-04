@@ -240,11 +240,11 @@ class NDM_Batch_Runner {
 
 			if ( is_wp_error( $result ) ) {
 				$state          = NDM_State::get_source();
-				$state['error'] = $result->get_error_message();
+				$state['error'] = $this->clean_error( $result->get_error_message() );
 				$state['stage'] = NDM_State::STAGE_ERROR;
 				$state['retries']++;
 				NDM_State::save_source( $state );
-				NDM_Log::error( 'Batch failed (will resume from checkpoint): ' . $result->get_error_message() );
+				NDM_Log::error( 'Batch failed (will resume from checkpoint): ' . $state['error'] );
 
 				// Auto-resume via cron unless it keeps failing.
 				if ( $state['retries'] <= 10 ) {
@@ -257,6 +257,22 @@ class NDM_Batch_Runner {
 		}
 
 		return NDM_State::get_source();
+	}
+
+	/**
+	 * Turn an error (possibly a whole WordPress error page) into a short,
+	 * readable message.
+	 *
+	 * @param string $message Raw message.
+	 * @return string
+	 */
+	private function clean_error( $message ) {
+		$message = wp_strip_all_tags( $message );
+		$message = trim( preg_replace( '/\s+/', ' ', $message ) );
+		if ( strlen( $message ) > 300 ) {
+			$message = substr( $message, 0, 300 ) . '…';
+		}
+		return $message;
 	}
 
 	/**
@@ -322,15 +338,7 @@ class NDM_Batch_Runner {
 		$has_rows = ! empty( $batch['rows'] );
 
 		if ( $has_rows ) {
-			$response = $client->post(
-				'rows',
-				array(
-					'base'    => $table['base'],
-					'columns' => $batch['columns'],
-					'rows'    => $batch['rows'],
-				),
-				120
-			);
+			$response = $this->send_rows( $client, $table['base'], $batch['columns'], $batch['rows'] );
 			if ( is_wp_error( $response ) ) {
 				return $response;
 			}
@@ -350,6 +358,59 @@ class NDM_Batch_Runner {
 		$state['table_index']      = $index;
 		$state['retries']          = 0;
 		NDM_State::save_source( $state );
+
+		return true;
+	}
+
+	/**
+	 * Send a row batch, automatically splitting it when the destination
+	 * chokes on it.
+	 *
+	 * A destination fatal (memory limit, max_allowed_packet, proxy body-size
+	 * limit) surfaces as a 5xx/invalid response. Rather than fail the whole
+	 * migration, the batch is halved and each half retried, down to a floor
+	 * of 25 rows. Because imports use REPLACE INTO, re-sending rows from a
+	 * partially applied batch is harmless.
+	 *
+	 * @param NDM_Client $client  Client.
+	 * @param string     $base    Base table name.
+	 * @param string[]   $columns Columns.
+	 * @param array[]    $rows    Encoded rows.
+	 * @return true|WP_Error
+	 */
+	private function send_rows( NDM_Client $client, $base, array $columns, array $rows ) {
+		$response = $client->post(
+			'rows',
+			array(
+				'base'    => $base,
+				'columns' => $columns,
+				'rows'    => $rows,
+			),
+			120
+		);
+
+		if ( ! is_wp_error( $response ) ) {
+			return true;
+		}
+
+		// Auth/validation errors won't be cured by smaller batches.
+		$code = $response->get_error_code();
+		if ( in_array( $code, array( 'ndm_http_400', 'ndm_http_401', 'ndm_http_403', 'ndm_not_connected' ), true ) ) {
+			return $response;
+		}
+
+		if ( count( $rows ) <= 25 ) {
+			return $response;
+		}
+
+		NDM_Log::warn( sprintf( 'Destination rejected a %d-row batch for %s; splitting and retrying.', count( $rows ), $base ) );
+
+		foreach ( array_chunk( $rows, (int) ceil( count( $rows ) / 2 ) ) as $half ) {
+			$result = $this->send_rows( $client, $base, $columns, $half );
+			if ( is_wp_error( $result ) ) {
+				return $result;
+			}
+		}
 
 		return true;
 	}

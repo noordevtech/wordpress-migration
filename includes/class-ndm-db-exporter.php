@@ -14,6 +14,17 @@ defined( 'ABSPATH' ) || exit;
 class NDM_DB_Exporter {
 
 	/**
+	 * Soft cap on the encoded payload size of one row batch, in bytes.
+	 *
+	 * The rows-per-batch setting caps row COUNT, but tables like Action
+	 * Scheduler logs or cart histories can carry rows of tens of kilobytes;
+	 * 500 of those would exceed the destination's PHP memory or request-size
+	 * limits and crash the import. A batch is cut early once its encoded
+	 * values pass this cap, whatever the row count.
+	 */
+	const MAX_BATCH_BYTES = 1048576; // 1 MB.
+
+	/**
 	 * List this site's tables (those using the WP prefix) with export metadata.
 	 *
 	 * @return array[] Each: name, base (name without prefix), pk, last_pk, offset, rows_total, rows_sent, done, created.
@@ -127,19 +138,32 @@ class NDM_DB_Exporter {
 			);
 		}
 
-		$columns = $rows ? array_keys( $rows[0] ) : array();
-		$encoded = array();
-		$last_pk = (int) $table['last_pk'];
+		$columns   = $rows ? array_keys( $rows[0] ) : array();
+		$encoded   = array();
+		$last_pk   = (int) $table['last_pk'];
+		$bytes     = 0;
+		$truncated = false;
+
+		/** This filter is documented above; lets hosts with tight limits shrink batches further. */
+		$max_bytes = (int) apply_filters( 'ndm_max_batch_bytes', self::MAX_BATCH_BYTES );
 
 		foreach ( $rows as $row ) {
 			$values = array();
 			foreach ( $columns as $column ) {
 				// Base64 every non-null value so binary-safe transport is guaranteed.
-				$values[] = null === $row[ $column ] ? null : base64_encode( $row[ $column ] );
+				$value    = null === $row[ $column ] ? null : base64_encode( $row[ $column ] );
+				$values[] = $value;
+				$bytes   += null === $value ? 0 : strlen( $value );
 			}
 			$encoded[] = $values;
 			if ( $table['pk'] && isset( $row[ $table['pk'] ] ) ) {
 				$last_pk = max( $last_pk, (int) $row[ $table['pk'] ] );
+			}
+
+			// Cut the batch early on payload size (always keep at least one row).
+			if ( $bytes >= $max_bytes && count( $encoded ) < count( $rows ) ) {
+				$truncated = true;
+				break;
 			}
 		}
 
@@ -147,8 +171,8 @@ class NDM_DB_Exporter {
 			'rows'         => $encoded,
 			'columns'      => $columns,
 			'next_last_pk' => $last_pk,
-			'next_offset'  => (int) $table['offset'] + count( $rows ),
-			'finished'     => count( $rows ) < $limit,
+			'next_offset'  => (int) $table['offset'] + count( $encoded ),
+			'finished'     => ! $truncated && count( $rows ) < $limit,
 		);
 	}
 

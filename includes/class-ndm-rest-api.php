@@ -175,6 +175,8 @@ class NDM_Rest_Api {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function route_rows( WP_REST_Request $request ) {
+		$this->raise_limits();
+
 		$base    = $this->sanitize_base( (string) $request->get_param( 'base' ) );
 		$columns = (array) $request->get_param( 'columns' );
 		$rows    = (array) $request->get_param( 'rows' );
@@ -234,6 +236,8 @@ class NDM_Rest_Api {
 	 * @return WP_REST_Response|WP_Error
 	 */
 	public function route_file_chunk( WP_REST_Request $request ) {
+		$this->raise_limits();
+
 		$path   = (string) $request->get_param( 'path' );
 		$offset = max( 0, (int) $request->get_param( 'offset' ) );
 		$data   = (string) $request->get_param( 'data' );
@@ -323,6 +327,16 @@ class NDM_Rest_Api {
 				'finalized_at'   => $state['finalized_at'],
 			)
 		);
+	}
+
+	/**
+	 * Give import requests as much headroom as the host allows.
+	 */
+	private function raise_limits() {
+		wp_raise_memory_limit( 'admin' );
+		if ( function_exists( 'set_time_limit' ) ) {
+			@set_time_limit( 120 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
+		}
 	}
 
 	/**
