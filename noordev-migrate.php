@@ -3,7 +3,7 @@
  * Plugin Name:       NoorDev Migrate
  * Plugin URI:        https://noordev.com
  * Description:       Live site-to-site migration. Syncs database and files batch by batch to a staging area on the target site, resumes automatically after interruptions, and performs an atomic cutover that preserves the target domain.
- * Version:           1.0.0
+ * Version:           1.0.1
  * Requires at least: 5.9
  * Requires PHP:      7.4
  * Author:            NoorDev
@@ -14,7 +14,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'NDM_VERSION', '1.0.0' );
+define( 'NDM_VERSION', '1.0.1' );
 define( 'NDM_PLUGIN_FILE', __FILE__ );
 define( 'NDM_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'NDM_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
