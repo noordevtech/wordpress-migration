@@ -350,6 +350,12 @@ class NDM_Batch_Runner {
 		if ( strlen( $message ) > 300 ) {
 			$message = substr( $message, 0, 300 ) . '…';
 		}
+
+		// Translate raw database/server errors into actions the user can take.
+		if ( false !== stripos( $message, 'is full' ) || false !== stripos( $message, 'disk full' ) || false !== stripos( $message, 'no space left' ) ) {
+			$message .= ' — the TARGET database server is out of disk space. Enlarge the database volume (or free space) on the target host, then press Resume.';
+		}
+
 		return $message;
 	}
 

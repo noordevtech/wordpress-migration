@@ -4,7 +4,7 @@ Tags: migration, clone, move site, backup, sync
 Requires at least: 5.9
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.3
+Stable tag: 1.0.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,10 @@ NoorDev Migrate pushes a live WordPress site to a new host batch by batch. Data 
 4. At 100%, press "Replace target site now" (or enable automatic cutover).
 
 == Changelog ==
+
+= 1.0.4 =
+* Improvement: transients (_transient_* / _site_transient_* options) are no longer migrated — they are regenerable cache and can bloat wp_options by hundreds of megabytes. Verification counts apply the same filter, and a new ndm_skip_row filter lets developers exclude further rows.
+* Improvement: "table is full" / disk-space errors from the target database now include an actionable explanation (enlarge the target's database volume, then Resume).
 
 = 1.0.3 =
 * Improvement: the source now checks the target's plugin version on every start and resume, and logs a prominent VERSION MISMATCH warning when the two sites run different builds — mixed versions are the usual cause of failures that look like data errors.

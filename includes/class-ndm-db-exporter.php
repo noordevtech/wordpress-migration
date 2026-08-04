@@ -43,7 +43,7 @@ class NDM_DB_Exporter {
 				continue;
 			}
 
-			$count = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM `' . str_replace( '`', '', $name ) . '`' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$count = self::count_rows( $name, $base );
 
 			$tables[] = array(
 				'name'       => $name,
@@ -59,6 +59,54 @@ class NDM_DB_Exporter {
 		}
 
 		return $tables;
+	}
+
+	/**
+	 * Row count for a table, applying the same skip rules as the export.
+	 *
+	 * @param string $name Full table name.
+	 * @param string $base Base table name.
+	 * @return int
+	 */
+	private static function count_rows( $name, $base ) {
+		global $wpdb;
+
+		$name = str_replace( '`', '', $name );
+
+		if ( 'options' === $base ) {
+			// Transients are skipped by the export; keep counts consistent so
+			// verification doesn't flag a false mismatch.
+			return (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$name}` WHERE option_name NOT LIKE '\\_transient\\_%' AND option_name NOT LIKE '\\_site\\_transient\\_%'" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		}
+
+		return (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$name}`" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	}
+
+	/**
+	 * Whether a row is excluded from the migration.
+	 *
+	 * Transients are cache: they can be large (WooCommerce/API caches), are
+	 * regenerated automatically, and bloat the target for no benefit.
+	 *
+	 * @param string $base Base table name.
+	 * @param array  $row  Row (associative).
+	 * @return bool
+	 */
+	public static function skip_row( $base, $row ) {
+		$skip = false;
+
+		if ( 'options' === $base && isset( $row['option_name'] ) ) {
+			$skip = (bool) preg_match( '/^_(site_)?transient_/', $row['option_name'] );
+		}
+
+		/**
+		 * Filter whether a row is skipped during export.
+		 *
+		 * @param bool   $skip Whether to skip.
+		 * @param string $base Base table name.
+		 * @param array  $row  The row.
+		 */
+		return (bool) apply_filters( 'ndm_skip_row', $skip, $base, $row );
 	}
 
 	/**
@@ -142,12 +190,23 @@ class NDM_DB_Exporter {
 		$encoded   = array();
 		$last_pk   = (int) $table['last_pk'];
 		$bytes     = 0;
+		$processed = 0;
 		$truncated = false;
 
 		/** This filter is documented above; lets hosts with tight limits shrink batches further. */
 		$max_bytes = (int) apply_filters( 'ndm_max_batch_bytes', self::MAX_BATCH_BYTES );
 
 		foreach ( $rows as $row ) {
+			// Skipped rows still advance the checkpoint — they're excluded, not deferred.
+			$processed++;
+			if ( $table['pk'] && isset( $row[ $table['pk'] ] ) ) {
+				$last_pk = max( $last_pk, (int) $row[ $table['pk'] ] );
+			}
+
+			if ( self::skip_row( $table['base'], $row ) ) {
+				continue;
+			}
+
 			$values = array();
 			foreach ( $columns as $column ) {
 				// Base64 every non-null value so binary-safe transport is guaranteed.
@@ -156,12 +215,9 @@ class NDM_DB_Exporter {
 				$bytes   += null === $value ? 0 : strlen( $value );
 			}
 			$encoded[] = $values;
-			if ( $table['pk'] && isset( $row[ $table['pk'] ] ) ) {
-				$last_pk = max( $last_pk, (int) $row[ $table['pk'] ] );
-			}
 
 			// Cut the batch early on payload size (always keep at least one row).
-			if ( $bytes >= $max_bytes && count( $encoded ) < count( $rows ) ) {
+			if ( $bytes >= $max_bytes && $processed < count( $rows ) ) {
 				$truncated = true;
 				break;
 			}
@@ -171,7 +227,7 @@ class NDM_DB_Exporter {
 			'rows'         => $encoded,
 			'columns'      => $columns,
 			'next_last_pk' => $last_pk,
-			'next_offset'  => (int) $table['offset'] + count( $encoded ),
+			'next_offset'  => (int) $table['offset'] + $processed,
 			'finished'     => ! $truncated && count( $rows ) < $limit,
 		);
 	}
@@ -187,8 +243,7 @@ class NDM_DB_Exporter {
 
 		$counts = array();
 		foreach ( $tables as $table ) {
-			$name                      = str_replace( '`', '', $table['name'] );
-			$counts[ $table['base'] ] = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM `' . $name . '`' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$counts[ $table['base'] ] = self::count_rows( $table['name'], $table['base'] );
 		}
 		return $counts;
 	}
