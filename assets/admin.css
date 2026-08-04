@@ -1,0 +1,103 @@
+.ndm-wrap .ndm-columns {
+	display: flex;
+	gap: 20px;
+	flex-wrap: wrap;
+	margin-top: 16px;
+}
+
+.ndm-card {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 16px 24px 24px;
+	flex: 1 1 480px;
+	min-width: 380px;
+}
+
+.ndm-progress {
+	background: #dcdcde;
+	border-radius: 999px;
+	height: 28px;
+	overflow: hidden;
+	margin: 12px 0 4px;
+}
+
+.ndm-progress-bar {
+	background: #2271b1;
+	height: 100%;
+	min-width: 2%;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	transition: width 0.4s ease;
+	border-radius: 999px;
+}
+
+.ndm-progress-bar.ndm-done {
+	background: #00a32a;
+}
+
+.ndm-progress-bar span {
+	color: #fff;
+	font-weight: 600;
+	font-size: 12px;
+	padding-right: 10px;
+}
+
+.ndm-stage-label {
+	font-weight: 600;
+	margin: 4px 0 12px;
+}
+
+.ndm-actions .button {
+	margin-right: 6px;
+	margin-bottom: 6px;
+}
+
+.ndm-danger {
+	color: #b32d2e;
+	border-color: #b32d2e;
+}
+
+.ndm-stats {
+	display: flex;
+	gap: 18px;
+	flex-wrap: wrap;
+	color: #50575e;
+	margin-bottom: 12px;
+}
+
+#ndm-log {
+	max-height: 260px;
+	overflow-y: auto;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	padding: 8px 12px;
+	font-family: Consolas, Monaco, monospace;
+	font-size: 12px;
+	margin: 0;
+}
+
+#ndm-log li {
+	margin: 2px 0;
+}
+
+.ndm-log-warn {
+	color: #996800;
+}
+
+.ndm-log-error {
+	color: #b32d2e;
+}
+
+.ndm-secret {
+	word-break: break-all;
+	display: inline-block;
+	max-width: 420px;
+	margin-right: 8px;
+}
+
+.ndm-inline-form {
+	display: inline;
+}
