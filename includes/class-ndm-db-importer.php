@@ -56,25 +56,55 @@ class NDM_DB_Importer {
 		// Re-point the statement at our staging table name regardless of what the source sent.
 		$create_sql = preg_replace( '/^CREATE TABLE `[^`]+`/', 'CREATE TABLE `' . str_replace( '`', '', $stage ) . '`', $create_sql, 1 );
 
+		// Drop FOREIGN KEY constraints: their REFERENCES clauses point at the
+		// source's live table names (which don't exist here), and staging
+		// tables are filled in alphabetical order, not dependency order.
+		$create_sql = self::strip_foreign_keys( $create_sql );
+
 		if ( $fresh ) {
 			$wpdb->query( 'DROP TABLE IF EXISTS `' . str_replace( '`', '', $stage ) . '`' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		}
 
 		$result = $wpdb->query( $create_sql ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$error  = $wpdb->last_error; // Capture now — any later query resets it.
 
-		if ( false === $result && $wpdb->last_error && false !== stripos( $wpdb->last_error, 'collation' ) ) {
+		if ( false === $result && $error && false !== stripos( $error, 'collation' ) ) {
 			// MySQL-8-only collations (utf8mb4_0900_*) don't exist on MariaDB;
 			// retry with the universally available equivalent.
 			$fallback = preg_replace( '/utf8mb4_0900_\w+/i', 'utf8mb4_unicode_ci', $create_sql );
 			$result   = $wpdb->query( $fallback ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$error    = $wpdb->last_error;
 		}
 
 		// Trust nothing: confirm the table is really there before accepting rows.
 		if ( ! self::stage_table_exists( $base ) ) {
-			return new WP_Error( 'ndm_create_failed', 'Could not create staging table ' . $stage . ': ' . ( $wpdb->last_error ? $wpdb->last_error : 'unknown database error' ) );
+			return new WP_Error( 'ndm_create_failed', 'Could not create staging table ' . $stage . ': ' . ( $error ? $error : 'unknown database error' ) );
 		}
 
 		return true;
+	}
+
+	/**
+	 * Remove FOREIGN KEY constraint definitions from a SHOW CREATE TABLE
+	 * statement, fixing up the trailing comma left behind.
+	 *
+	 * @param string $create_sql CREATE statement (one definition per line, as
+	 *                           emitted by SHOW CREATE TABLE).
+	 * @return string
+	 */
+	public static function strip_foreign_keys( $create_sql ) {
+		$lines = preg_split( '/\r?\n/', $create_sql );
+		$kept  = array();
+		foreach ( $lines as $line ) {
+			if ( preg_match( '/^\s*CONSTRAINT\b.*\bFOREIGN KEY\b/i', $line ) || preg_match( '/^\s*FOREIGN KEY\b/i', $line ) ) {
+				continue;
+			}
+			$kept[] = $line;
+		}
+		$sql = implode( "\n", $kept );
+
+		// A removed final constraint leaves ",\n)" behind.
+		return preg_replace( '/,(\s*\))/', '$1', $sql );
 	}
 
 	/**

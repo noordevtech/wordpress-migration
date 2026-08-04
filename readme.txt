@@ -4,7 +4,7 @@ Tags: migration, clone, move site, backup, sync
 Requires at least: 5.9
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,10 @@ NoorDev Migrate pushes a live WordPress site to a new host batch by batch. Data 
 4. At 100%, press "Replace target site now" (or enable automatic cutover).
 
 == Changelog ==
+
+= 1.0.2 =
+* Fix: tables with FOREIGN KEY constraints (e.g. Shield Security logs) failed to stage — their REFERENCES clauses pointed at source table names absent on the destination. Foreign keys are now stripped from staging tables; imports are order-independent.
+* Fix: the real database error from a failed CREATE was wiped by the follow-up existence check and reported as "unknown database error"; the error is now captured immediately.
 
 = 1.0.1 =
 * Fix: concurrent sync loops (dashboard + WP-Cron) could race and drop a staging table mid-import; the engine is now serialized behind a MySQL named lock.
