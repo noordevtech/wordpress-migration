@@ -188,7 +188,18 @@ class NDM_Rest_Api {
 		$state    = NDM_State::get_dest();
 		$replacer = new NDM_Search_Replace( (array) $state['replacements'] );
 
-		$written = NDM_DB_Importer::import_rows( $base, $columns, $rows, $replacer, $state['source_prefix'] );
+		try {
+			$written = NDM_DB_Importer::import_rows( $base, $columns, $rows, $replacer, $state['source_prefix'] );
+		} catch ( \Throwable $e ) {
+			// Surface the real cause to the source's activity log instead of
+			// letting WordPress render an opaque critical-error page.
+			NDM_Log::error( 'Import crashed on ' . $base . ': ' . $e->getMessage() );
+			return new WP_Error(
+				'ndm_import_crash',
+				sprintf( 'Import crashed on %s: %s (%s:%d)', $base, $e->getMessage(), basename( $e->getFile() ), $e->getLine() ),
+				array( 'status' => 500 )
+			);
+		}
 		if ( is_wp_error( $written ) ) {
 			$written->add_data( array( 'status' => 500 ) );
 			return $written;

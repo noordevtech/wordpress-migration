@@ -101,9 +101,15 @@ class NDM_Search_Replace {
 		}
 
 		if ( is_serialized( $value ) ) {
-			$decoded = @unserialize( $value, array( 'allowed_classes' => false ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.PHP.DiscouragedPHPFunctions
-			if ( false !== $decoded || 'b:0;' === $value ) {
-				return serialize( $this->replace_recursive( $decoded ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+			try {
+				$decoded = @unserialize( $value, array( 'allowed_classes' => false ) ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.PHP.DiscouragedPHPFunctions
+				if ( false !== $decoded || 'b:0;' === $value ) {
+					return serialize( $this->replace_recursive( $decoded ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions
+				}
+			} catch ( \Throwable $e ) {
+				// If the structure cannot be transformed safely, keep it intact
+				// rather than risk corrupting it with a naive string replace.
+				return $value;
 			}
 			// Corrupt serialized data: fall through to plain replace as a best effort.
 		}
@@ -136,6 +142,14 @@ class NDM_Search_Replace {
 		}
 
 		if ( is_object( $data ) ) {
+			// Objects of classes not loaded here (e.g. ActionScheduler schedules,
+			// since we unserialize with allowed_classes => false) come back as
+			// __PHP_Incomplete_Class. Reading or writing their properties is a
+			// PHP fatal error, and their payload round-trips through serialize()
+			// untouched — so leave them exactly as they are.
+			if ( $data instanceof __PHP_Incomplete_Class ) {
+				return $data;
+			}
 			foreach ( get_object_vars( $data ) as $key => $value ) {
 				$data->{$key} = $this->replace_recursive( $value );
 			}
