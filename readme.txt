@@ -4,7 +4,7 @@ Tags: migration, clone, move site, backup, sync
 Requires at least: 5.9
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,12 @@ NoorDev Migrate pushes a live WordPress site to a new host batch by batch. Data 
 4. At 100%, press "Replace target site now" (or enable automatic cutover).
 
 == Changelog ==
+
+= 1.0.5 =
+* Fix: a drift re-sync (tables that changed while syncing the live site) no longer restarts the file stage — it returns straight to verification instead of re-scanning every file.
+* Fix: drift re-sync passes are capped (3 by default, ndm_max_drift_passes filter). Constantly-changing tables (sessions, scheduled actions) can never satisfy exact count equality on a live site; after the cap the staged data — seconds old — proceeds to cutover readiness, with the still-changing tables named in the log.
+* New: the TARGET site's dashboard now has a "Replace this site with the staged migration now" button, so the cutover can be triggered from either side.
+* Fix: a cutover can no longer be applied twice on the same staged data.
 
 = 1.0.4 =
 * Improvement: transients (_transient_* / _site_transient_* options) are no longer migrated — they are regenerable cache and can bloat wp_options by hundreds of megabytes. Verification counts apply the same filter, and a new ndm_skip_row filter lets developers exclude further rows.

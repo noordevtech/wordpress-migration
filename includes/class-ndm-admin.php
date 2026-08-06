@@ -42,7 +42,7 @@ class NDM_Admin {
 		add_action( 'admin_post_ndm_save_settings', array( $this, 'handle_save_settings' ) );
 		add_action( 'admin_post_ndm_regenerate_secret', array( $this, 'handle_regenerate_secret' ) );
 
-		foreach ( array( 'start', 'resume', 'pause', 'cancel', 'cutover', 'status', 'tick', 'rollback', 'cleanup_backups' ) as $action ) {
+		foreach ( array( 'start', 'resume', 'pause', 'cancel', 'cutover', 'status', 'tick', 'rollback', 'cleanup_backups', 'dest_cutover' ) as $action ) {
 			add_action( 'wp_ajax_ndm_' . $action, array( $this, 'ajax_' . $action ) );
 		}
 	}
@@ -169,6 +169,24 @@ class NDM_Admin {
 	public function ajax_status() {
 		$this->ajax_guard();
 		wp_send_json_success( $this->status_payload() );
+	}
+
+	/**
+	 * AJAX: cutover triggered locally on the TARGET site.
+	 *
+	 * Same operation the source's finalize request performs, but runnable
+	 * from this site's own dashboard once staged data is present.
+	 */
+	public function ajax_dest_cutover() {
+		$this->ajax_guard();
+
+		$settings = wp_parse_args( get_option( 'ndm_settings', array() ), array( 'delete_extra_files' => true ) );
+
+		$result = NDM_Finalizer::run( ! empty( $settings['delete_extra_files'] ) );
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+		wp_send_json_success( $result );
 	}
 
 	/**
@@ -445,6 +463,28 @@ class NDM_Admin {
 									?>
 								</td>
 							</tr>
+							<?php if ( empty( $dest_state['finalized_at'] ) && ! empty( $dest_state['tables'] ) ) : ?>
+								<tr>
+									<th scope="row"><?php esc_html_e( 'Replace this site', 'noordev-migrate' ); ?></th>
+									<td>
+										<button type="button" class="button button-primary button-hero" id="ndm-dest-cutover"><?php esc_html_e( 'Replace this site with the staged migration now', 'noordev-migrate' ); ?></button>
+										<p class="description"><?php esc_html_e( 'Run this only when the source dashboard shows the sync is 100% complete. This site keeps its own domain. The current database is backed up first; the operation can take a few minutes.', 'noordev-migrate' ); ?></p>
+									</td>
+								</tr>
+							<?php elseif ( ! empty( $dest_state['finalized_at'] ) ) : ?>
+								<tr>
+									<th scope="row"><?php esc_html_e( 'Cutover', 'noordev-migrate' ); ?></th>
+									<td>
+										<?php
+										printf(
+											/* translators: %s: date/time of the cutover. */
+											esc_html__( 'Completed on %s. This site now serves the migrated content.', 'noordev-migrate' ),
+											esc_html( wp_date( 'Y-m-d H:i', $dest_state['finalized_at'] ) )
+										);
+										?>
+									</td>
+								</tr>
+							<?php endif; ?>
 						<?php endif; ?>
 						<?php if ( $has_backups ) : ?>
 							<tr>

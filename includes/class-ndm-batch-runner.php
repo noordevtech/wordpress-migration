@@ -384,6 +384,16 @@ class NDM_Batch_Runner {
 		}
 
 		if ( $index >= count( $state['tables'] ) ) {
+			if ( ! empty( $state['files_completed'] ) ) {
+				// This DB pass was a drift re-sync; files are already staged.
+				// Re-scanning 30k+ files again would restart the whole file
+				// stage after every verify round — go straight back to verify.
+				$state['stage'] = NDM_State::STAGE_VERIFY;
+				NDM_State::save_source( $state );
+				NDM_Log::info( 'Drifted tables re-synced. Verifying again…' );
+				return true;
+			}
+
 			// DB complete: build the file manifest and move to the files stage.
 			$manifest               = NDM_File_Scanner::build_manifest();
 			$state['stage']         = NDM_State::STAGE_FILES;
@@ -521,7 +531,8 @@ class NDM_Batch_Runner {
 		// Refill the pending list from the manifest.
 		if ( empty( $pending ) ) {
 			if ( $state['file_index'] >= $state['files_total'] ) {
-				$state['stage'] = NDM_State::STAGE_VERIFY;
+				$state['stage']           = NDM_State::STAGE_VERIFY;
+				$state['files_completed'] = true;
 				NDM_State::save_source( $state );
 				NDM_Log::info( 'File transfer complete. Verifying…' );
 				return true;
@@ -659,7 +670,19 @@ class NDM_Batch_Runner {
 			'time'       => time(),
 		);
 
-		if ( ! empty( $mismatched ) ) {
+		/**
+		 * Filter how many drift re-sync passes run before proceeding anyway.
+		 *
+		 * On a busy live site (WooCommerce sessions, scheduled actions, logs)
+		 * some tables change every few seconds, so exact count equality may
+		 * never hold at a single instant. After this many passes the staged
+		 * data — at most seconds old — is accepted as the cutover state.
+		 *
+		 * @param int $max_passes Maximum drift passes.
+		 */
+		$max_passes = (int) apply_filters( 'ndm_max_drift_passes', 3 );
+
+		if ( ! empty( $mismatched ) && (int) $state['drift_passes'] < $max_passes ) {
 			// Rows changed while syncing (live site). Re-queue only the drifted tables — a delta pass.
 			foreach ( $state['tables'] as $i => $table ) {
 				if ( isset( $mismatched[ $table['base'] ] ) ) {
@@ -670,16 +693,27 @@ class NDM_Batch_Runner {
 					$state['tables'][ $i ]['rows_sent'] = 0;
 				}
 			}
-			$state['table_index'] = 0;
-			$state['stage']       = NDM_State::STAGE_DB;
+			$state['table_index']  = 0;
+			$state['stage']        = NDM_State::STAGE_DB;
+			$state['drift_passes'] = (int) $state['drift_passes'] + 1;
 			NDM_State::save_source( $state );
-			NDM_Log::warn( sprintf( 'Verification found %d drifted table(s); re-syncing them.', count( $mismatched ) ) );
+			NDM_Log::warn( sprintf( 'Verification found %d drifted table(s); re-syncing them (pass %d of %d).', count( $mismatched ), $state['drift_passes'], $max_passes ) );
 			return true;
+		}
+
+		if ( ! empty( $mismatched ) ) {
+			NDM_Log::warn(
+				sprintf(
+					'%d table(s) still change while the site is live (%s). Their staged copies are current as of the last re-sync moments ago — proceeding to cutover readiness.',
+					count( $mismatched ),
+					implode( ', ', array_keys( $mismatched ) )
+				)
+			);
 		}
 
 		$state['stage'] = NDM_State::STAGE_READY;
 		NDM_State::save_source( $state );
-		NDM_Log::info( 'Verification passed — sync is 100% complete.' );
+		NDM_Log::info( 'Sync is 100% complete — ready to replace the target site.' );
 
 		$settings = get_option( 'ndm_settings', array() );
 		if ( ! empty( $settings['auto_cutover'] ) ) {

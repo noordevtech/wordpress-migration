@@ -154,6 +154,28 @@
 		$( '#ndm-cutover' ).on( 'click', function () {
 			simpleAction( 'cutover', {}, ndmAdmin.i18n.confirmCutover );
 		} );
+		$( '#ndm-dest-cutover' ).on( 'click', function () {
+			if ( ! window.confirm( ndmAdmin.i18n.confirmCutover ) ) {
+				return;
+			}
+			var $button = $( this );
+			$button.prop( 'disabled', true ).text( 'Replacing… do not close this tab' );
+			post( 'dest_cutover' )
+				.done( function ( response ) {
+					if ( response && response.success ) {
+						window.location.reload();
+					} else {
+						window.alert( response && response.data && response.data.message ? response.data.message : 'Cutover failed.' );
+						$button.prop( 'disabled', false ).text( 'Replace this site with the staged migration now' );
+					}
+				} )
+				.fail( function () {
+					// The request may have timed out at the proxy while the cutover
+					// keeps running server-side; reload to see the real state.
+					window.location.reload();
+				} );
+		} );
+
 		$( '#ndm-rollback' ).on( 'click', function () {
 			simpleAction( 'rollback', {}, ndmAdmin.i18n.confirmCutover );
 		} );

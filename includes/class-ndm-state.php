@@ -48,6 +48,8 @@ class NDM_State {
 			'file_index'   => 0,
 			'file_offset'  => 0,
 			'manifest'     => '',
+			'files_completed' => false,
+			'drift_passes' => 0,
 			'started_at'   => 0,
 			'updated_at'   => 0,
 			'finished_at'  => 0,

@@ -71,6 +71,9 @@ class NDM_Finalizer {
 		if ( empty( $dest_state['active'] ) || empty( $dest_state['tables'] ) ) {
 			return new WP_Error( 'ndm_nothing_staged', 'No staged migration to finalize.' );
 		}
+		if ( ! empty( $dest_state['finalized_at'] ) ) {
+			return new WP_Error( 'ndm_already_finalized', 'This staged migration was already applied. Start a new sync from the source to migrate again.' );
+		}
 
 		// The essentials must be staged or the swapped site cannot boot.
 		foreach ( array( 'options', 'posts', 'users', 'usermeta' ) as $required ) {
